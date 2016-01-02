@@ -91,7 +91,9 @@ class rosFDM:
         jsb_in.setblocking(0)
         self.jsb_in = jsb_in
     def channel_input(self,data):
-         rospy.loginfo(rospy.get_caller_id() + "I heard %s", data.data)
+        a = Joy()
+        #rospy.loginfo(rospy.get_caller_id() + "I heard %s", data.axes)
+        self.axes = data.axes
     def setup_fdm(self):
         self.fdm = fgFDM.fgFDM()
         jsb_console = self.jsb_console
@@ -146,7 +148,10 @@ class rosFDM:
 
     def update_input(self):
         opts = self.opts
-        c4 , c2 , c1 , c3 =  0 , 0 ,0 ,0
+        try:
+            c1 , c2 , c3 ,c4 = self.axes[0] , self.axes[1] , self.axes[2] , self.axes[3]
+        except:
+            c1 ,c2 ,c3 ,c4 = 0,0,0,0
         speed = 0
         direction = 0
         turbulance = 0
@@ -279,7 +284,7 @@ class rosFDM:
                 self.update_wind(self.wind)
                 last_wind_update = tnow
 
-            if tnow - last_report > 1:
+            if tnow - last_report > 0.1:
                 print("FPS %u asl=%.1f agl=%.1f roll=%.1f pitch=%.1f a=(%.2f %.2f %.2f) AR=%.1f" % (
                     frame_count / (time.time() - last_report),
                     fdm.get('altitude', units='meters'),
