@@ -4,14 +4,17 @@ import sys, os, pexpect, socket
 import math, time, select, struct, signal, errno
 import pygame
 import rospy
+import tf
 from std_msgs.msg import String
 from sensor_msgs.msg import Joy
 from pysim import util
 from pymavlink import fgFDM
 import atexit
 from pexpect import fdpexpect
-from geometry_msgs.msg import Pose,Pose2D
-
+from geometry_msgs.msg import Pose,Pose2D,Twist,PoseWithCovariance,TwistWithCovariance
+from nav_msgs.msg import Odometry
+import math
+C_EARTH = 6372000
 respath = "/Users/xuhao/Develop/FixedwingProj/ros_ws/src/ros_jsbsim/resources/"
 os.chdir(respath)
 
@@ -38,9 +41,12 @@ class rosFDM:
         self.launchjsb()
         self.wind = util.Wind(opts.wind)
         self.setup_fdm()
+        self.init_pos = 0
         rospy.init_node('rosFDM')
         rospy.Subscriber("/joystick", Joy, self.channel_input)
-        self.pos_pub = rospy.Publisher('/latlon', Pose2D, queue_size=0)
+        self.pos_pub = rospy.Publisher('/fdm/latlon', Pose2D, queue_size=0)
+        self.odom_pub = rospy.Publisher('/fdm/odometry', Odometry, queue_size=0)
+        self.pose_pub = rospy.Publisher('/fdm/pose',Pose,queue_size=0)
 
     def exit_handler(self):
         '''exit the sim'''
@@ -223,9 +229,34 @@ class rosFDM:
                              fdm.get('psi', units='degrees'),
                              fdm.get('vcas', units='mps'),
                              0x4c56414f)
-        latlondata = Pose2D(fdm.get('latitude', units='degrees'),
-                             fdm.get('longitude', units='degrees'),0)
+        #lon E lat N
+        latlondata = Pose2D(fdm.get('longitude', units='radians'),
+                             fdm.get('latitude', units='radians'),fdm.get('altitude',units="meters"))
         self.pos_pub.publish(latlondata)
+        roll = fdm.get("phi",units = 'radians')
+        pitch = fdm.get("theta",units = 'radians')
+        yaw = fdm.get("psi",units='radians')
+        quaternion = tf.transformations.quaternion_from_euler(roll, pitch, yaw)
+        pose0 = Pose()
+        pose0.orientation.x = quaternion[0]
+        pose0.orientation.y = quaternion[1]
+        pose0.orientation.z = quaternion[2]
+        pose0.orientation.w = quaternion[3]
+        if self.init_pos == 0:
+            pose0.position.x = 0
+            pose0.position.y = 0
+            pose0.position.z = - fdm.get("altitude",units="meters")
+            self.init_pos = latlondata
+        else:
+            d_lon = latlondata.x - self.init_pos.x
+            d_lat = latlondata.y - self.init_pos.y
+            pose0.position.x = d_lat * C_EARTH
+            pose0.position.y = d_lon * C_EARTH * math.cos(self.init_pos.y)
+            pose0.position.z = - fdm.get("altitude",units="meters")
+        twist0 = Twist()
+        odom = Odometry(pose = PoseWithCovariance( pose = pose0),twist = TwistWithCovariance(twist = twist0))
+        self.odom_pub.publish(odom)
+        self.pose_pub.publish(pose0)
 
 
     def main_loop(self):
